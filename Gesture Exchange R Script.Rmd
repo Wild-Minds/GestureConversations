@@ -1,0 +1,598 @@
+---
+title: "Gesture Exchange R script"
+author: "Gal Badihi"
+date: "2024-05-06"
+output: html_document
+editor_options: 
+chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Descriptive stats**
+
+```{r}
+#check proportion of play in each community
+levels(xdata$Goal)
+Son_play<-sum(xdata$Social_unit=="Sonso" & xdata$Goal%in%c("PlayChange", "PlayChangeChangeacon", "PlayChangeContactcha", "PlayContinue", "PlayStart"))/sum(xdata$Social_unit=="Sonso")
+Iss_play<-sum(xdata$Social_unit=="Issa" & xdata$Goal%in%c("PlayChange", "PlayChangeChangeacon", "PlayChangeContactcha", "PlayContinue", "PlayStart"))/sum(xdata$Social_unit=="Issa")
+Kan_play<-sum(xdata$Social_unit=="Kanyawara" & xdata$Goal%in%c("PlayChange", "PlayChangeChangeacon", "PlayChangeContactcha", "PlayContinue", "PlayStart"))/sum(xdata$Social_unit=="Kanyawara")
+Kal_play<-sum(xdata$Social_unit=="Kalinzu" & xdata$Goal%in%c("PlayChange", "PlayChangeChangeacon", "PlayChangeContactcha", "PlayContinue", "PlayStart"))/sum(xdata$Social_unit=="Kalinzu")
+Wab_play<-sum(xdata$Social_unit=="Waibira" & xdata$Goal%in%c("PlayChange", "PlayChangeChangeacon", "PlayChangeContactcha", "PlayContinue", "PlayStart"))/sum(xdata$Social_unit=="Waibira")
+#count number of gesture tokens in each community
+head(xdata)
+table(xdata$Social_unit)
+
+##descriptives
+#number of individuals 
+xdata$ID_com<-paste(xdata$Signaller, xdata$Social_unit, sep = "")
+levels(xdata$Signaller)
+id_data<-xdata[!xdata$Signaller%in%c("Unk","Unk_M","Unk_F", "StrF", "SA_M", "J", "I", "A_M", "A_F"),]
+id_data<-droplevels(id_data)
+nlevels(as.factor(id_data$ID_com))
+nlevels(as.factor(xdata$ID_com))
+
+#total number of communicative interactions
+n_com<-length(unique(xdata$Com_raw))
+#number of communicative interactions that involved a gesture-to-gesture exchange 
+n_exchanges<-length(unique(ex_com$Com_raw))
+#proportion of communications that include exchange
+(n_exchanges/n_com)*100
+
+
+# Count the numbers of cases of exchanges with different number of turns
+first_g<-ex_com[ex_com$Part_exchange%in%c("1_2", "1_3", "1_4", "1_5", "1_6", "1_7", "1_8"),]
+head(first_g)
+table(first_g$Part_exchange)
+first_g <- first_g %>%
+  distinct(Com_raw, .keep_all = TRUE)
+
+#statistical descriptives for gesture-to-gesture exchanges
+nrow(mau_iqr_5)
+max(raw_mau$Gesture_latency_MAU)
+min(raw_mau$Gesture_latency_MAU)
+
+mean(ex_lat_mau$Gesture_latency_MAU)
+sd(ex_lat_mau$Gesture_latency_MAU)
+range(ex_lat_mau$Gesture_latency_MAU)
+median(ex_lat_mau$Gesture_latency_MAU)
+IQR(ex_lat_mau$Gesture_latency_MAU)
+quantile(ex_lat_mau$Gesture_latency_MAU, 0.05)
+quantile(ex_lat_mau$Gesture_latency_MAU, 0.95)
+
+#statistical descriptives for gesture-to-behaviour latency
+nrow(out_iqr_5)
+max(out_iqr_5$Outcome_duration)
+max(raw_out$Outcome_duration)
+min(out_iqr_5$Outcome_duration)
+min(raw_out$Outcome_duration)
+round(range(mau_iqr_5$Gesture_latency_MAU),4)
+
+mean(time$Outcome_duration)
+min(time$Outcome_duration)
+max(time$Outcome_duration)
+sd(time$Outcome_duration)
+median(time$Outcome_duration)
+IQR(time$Outcome_duration)
+median(ex_lat_mau$Gesture_latency_MAU)
+range(time$Outcome_duration)
+quantile(time$Outcome_duration, 0.05)
+quantile(time$Outcome_duration, 0.95)
+```
+
+**Tidy dataframes**
+
+```{r}
+# Create a new column with letters removed from communication_number
+xdata$Com_raw <- gsub("[a-zA-Z].*", "", xdata$Communication_number)
+
+#define whether of not the communication was part of an exchange or not
+xdata$Exchange<-ifelse(xdata$Part_exchange=="1_1", "N", 
+                       ifelse(xdata$Part_exchange=="Unclear", NA, "Y"))
+
+#create a dataset that only include exchanges
+ex_com <- xdata[grepl("[ab]$", xdata$Communication_number), ]
+
+#arrange the rows by communication number and gesture start time
+ex_com <- ex_com %>%
+  arrange(Com_raw, Gesture_start_time)
+
+
+#calculate the latency between gesture start and the end of previous gesture MAU
+ex_com$Gesture_latency_MAU<- ifelse(ex_com$Signaller != lag(ex_com$Signaller) & ex_com$Com_raw==lag(ex_com$Com_raw) &lag(ex_com$Mau_value=="MAU_GA_in"|ex_com$Mau_value=="MAU_in")& ex_com$Duration_analysis_include%in%c("ExcludeEnd", "Include"), 
+                                     ex_com$Gesture_start_time - lag(ex_com$Mau_end_time), NA)
+
+#create dataframe that only includes gesture exchanges - removes any cases where signaller used multiple gestures before exchange 
+ex_lat_mau<-ex_com[!is.na(ex_com$Gesture_latency_MAU),]
+
+#create dataframe just with key variables for MAU
+raw_mau<-ex_lat_mau%>%select(Gesture_latency_MAU, Com_raw, Goal,Signaller, Recipient, Social_unit, Signaller_age, Recipient_age)
+nrow(raw_mau)
+#include only 95% interquartile range
+mau_iqr_5<-raw_mau[raw_mau$Gesture_latency_MAU >= (quantile(raw_mau$Gesture_latency_MAU,0.05)) & raw_mau$Gesture_latency_MAU <= (quantile(raw_mau$Gesture_latency_MAU,0.95)), ]
+
+#check how many cases were dropped as outliers
+nrow(raw_mau)-nrow(mau_iqr_5)
+
+#Do the same as above for latency to behavioural response
+time<-as.data.frame(xdata %>%
+                      group_by(Communication_number) %>%
+                      mutate(last_MAU= max(Mau_end_time)))
+
+#Outcome duration calculated as the duration between last MAU and outcome being met
+time$Outcome_duration<-time$Outcome_time-time$last_MAU
+
+#remove any exchanges
+time<-time[time$Part_exchange=="1_1",]
+time<-time[!grepl("[ab]", time$Communication_number), ]
+
+#remove any communications where MAU was not the last one
+time<-time[time$last_MAU==time$Mau_end_time,]
+
+#remove cases where MAU or Outcome timing was unknown
+time_ex<-time[time$Mau_value%in%c("MAU_GA_in", "MAU_in")&
+             time$Outcome%in%c("GoalAmbiguous","GoalRecipient", "GoalSignaller"),]
+
+#create df with only the key variable tiers
+raw_out<-time_ex%>%select(Outcome_duration, Communication_number,Goal,Signaller, Recipient, Social_unit,Signaller_age, Recipient_age)
+#95% iqr
+out_iqr_5<-raw_out[raw_out$Outcome_duration >= (quantile(raw_out$Outcome_duration,0.05)) & raw_out$Outcome_duration <= (quantile(raw_out$Outcome_duration,0.95)), ]
+
+#check how many cases were removed as outliers
+(nrow(raw_out))-(nrow(out_iqr_5))
+```
+
+
+**Statistical analysis: GLMMS**
+first create dataset that can be used for this analysis
+
+```{r}
+
+#extract the tiers that can be useful from mau and outcome dfs - use 95% IQR to remove outliers
+mau_glmm<-as.data.frame(mau_iqr_5%>%select(Gesture_latency_MAU,Com_raw, Social_unit, Signaller, Recipient, Goal, Signaller_age,Recipient_age))
+
+out_glmm<-as.data.frame(out_iqr_5%>%select(Outcome_duration,Communication_number, Social_unit, Signaller, Recipient, Goal,Signaller_age,Recipient_age))
+
+#add column with type of exchange
+mau_glmm$Type<-"Gesture"
+out_glmm$Type<-"Behaviour"
+
+#change column names to match
+colnames(mau_glmm)<-c("Latency", "Com_number", "Social_unit", "Signaller", "Recipient","Goal","Sgn_age","Rcp_age", "Type")
+colnames(out_glmm)<-c("Latency", "Com_number", "Social_unit", "Signaller", "Recipient","Goal","Sgn_age","Rcp_age", "Type")
+
+#combine into one dateframe
+latency_glmm<-rbind(mau_glmm, out_glmm)
+
+#add dyad id
+latency_glmm$ID_dyad<-paste(latency_glmm$Social_unit, latency_glmm$Recipient, latency_glmm$Signaller)
+latency_glmm_raw<-latency_glmm#create one dataset with this raw value before excluding any unknown IDs and play
+
+#create same datasets but only including interactions with at least one mature individual
+#full dataset
+latency_glmm_adult <- subset(latency_glmm, Sgn_age > 10 | Rcp_age > 10)
+#gesture-to-gesture exchange dataset
+mau_glmm_adult <- subset(mau_glmm, Sgn_age > 10 | Rcp_age > 10)
+
+####remove cases in which ID was not known or within the play context 
+#Note: this step should be repeated for the datasets of interactions with at least 1 adult (defined above)
+#remove cases where the recipient and/or signaller was unknown
+latency_glmm<-latency_glmm[!latency_glmm$Recipient%in%c("Unk_F", "Unk_M", "Unk", "StrF", "SA_M", "Other_spec", "Observer", "Multiple individuals", "J", "I", "Dead chimp", "A_F", "A_M"),]
+latency_glmm<-latency_glmm[!latency_glmm$Signaller%in%c("Unk_F", "Unk_M", "Unk", "StrF", "SA_M", "Other_spec", "Observer", "Multiple individuals", "J", "I", "Dead chimp", "A_F", "A_M"),]
+latency_glmm<-droplevels(latency_glmm)
+
+
+#number of cases removd in this step
+unk_id_removed<-nrow(latency_glmm_raw)-nrow(latency_glmm)
+
+#remove play goals
+levels(latency_glmm$Goal)
+latency_glmm<-latency_glmm[!latency_glmm$Goal%in%c("Play"),]
+
+#number of cases removed in this step
+play_removed<-nrow(latency_glmm_raw)-nrow(latency_glmm)+unk_id_removed
+```
+
+Dataset descriptives for the model Note: this should be repeated for each model dataframe, this example includes the data from model 1
+
+```{r}
+#sample size descriptives
+nrow(latency_glmm)
+
+#count number of cases for each response type
+table(latency_glmm$Type)
+#count number of dyads
+nlevels(as.factor(latency_glmm$ID_dyad))
+```
+
+*Model 1. glmm for comparing type of latency*
+
+```{r}
+#building the model
+library(lme4)
+detach("package:lmerTest", unload = TRUE)
+nrow(latency_glmm)#check number of rows in the dataset
+
+#first build the model with an interaction between Type and Social_unit
+m_lat_int<-lme4::lmer(Latency~Type*Social_unit+(1|ID_dyad)+(1|Com_number), data=latency_glmm, REML=F)
+#use drop1 function to check if the model was significant
+result_mlat_int<-as.data.frame(drop1(m_lat_int, test="Chisq"))
+round(result_mlat_int, 3)
+
+#build model without interaction because it was not significant
+m_lat<-lme4::lmer(Latency~Type+Social_unit+(1|ID_dyad)+(1|Com_number), data=latency_glmm, REML=F)
+
+#check the difference in fit of both models
+logLik(m_lat)
+logLik(m_lat_int)
+
+#check model assumptions
+setwd("/workingdirectory")
+source("diagnostic_fcns.r")
+qq_m_lat<-diagnostics.plot(m_lat)#okay
+diag_ran_m_lat<-ranef.diagn.plot(m_lat)#okay
+
+
+#check model stability - this doesn't usually work but could try later
+source("glmm_stability.r")
+full.stab=glmm.model.stab(model.res=m_lat, contr=NULL, para=F, data=NULL)
+head(full.stab$detailed, 4)
+table(full.stab$detailed$lme4.warnings)
+table(full.stab$detailed$opt.warnings)
+#look at full model stablity 
+round(full.stab$summary[, -1], 3)
+
+#look at full model stablity 
+round(full.stab$summary[, -1], 3)
+
+#identify the rows that will include random effects
+is.re=grepl(x=rownames(full.stab$summary), pattern="@")
+#plot stability of fixed effects in the model
+m.stab.plot(full.stab$summary[!is.re, -1])
+#plot stability of random effect in the model
+m.stab.plot(full.stab$summary[is.re, -1])
+
+
+#create null model for full-null comparison
+null_m_lat=lmer(Latency~Social_unit+(1|ID_dyad)+(1|Com_number), data=latency_glmm, REML=F)
+
+#full null comparison
+as.data.frame(anova(null_m_lat, m_lat, test="Chisq"))
+
+#lmer_Test results
+library(lmerTest)
+m_lat.reml=lmerTest::lmer(Latency~Type+Social_unit+(1|ID_dyad)+(1|Com_number), data=latency_glmm_adult, REML=T)
+round(summary(m_lat.reml)$coefficients, 3)
+
+#save results in dataframe
+result_mlat<-as.data.frame(drop1(m_lat, test="Chisq"))
+round(result_mlat, 3)
+summary(m_lat.reml)$coefficient
+
+#bootstrapped confidence intervals
+source("boot_glmm.r")
+boot.full=boot.glmm.pred(model.res=m_lat, excl.warnings=F,
+nboots=1000, para=T, n.cores=4, resol=1000, level=0.95)
+#results
+round(boot.full$ci.estimates, 3)
+
+m.stab.plot(boot.full$ci.estimates)
+
+#getting minimum and maximum by dropping one random effect at a time
+coef_results_df <- data.frame(ID_dyad = numeric(0),
+                              Variable = character(0),
+                              Estimate = numeric(0),
+                              Std_Error = numeric(0),
+                              t_value = numeric(0),
+                              p_value = numeric(0))
+for(i in unique(latency_glmm$ID_dyad)){
+  m_temp<-lmerTest::lmer(Latency~Type+Social_unit+(1|ID_dyad), data=latency_glmm_adult[!latency_glmm_adult$ID_dyad==i,])
+  #store the results from all the models 
+ temp_df <- data.frame(ID_dyad = i,
+                       Variable = rownames(coef(summary(m_temp))),
+                        Estimate = coef(summary(m_temp))[, 1],
+                        Std_Error = coef(summary(m_temp))[, 2],
+                        t_value = coef(summary(m_temp))[, 3],
+                        p_value = coef(summary(m_temp))[, 4])
+  
+  # Add the temporary data frame to coef_results_df
+  coef_results_df <- rbind(coef_results_df, temp_df)
+}
+head(coef_results_df)
+
+#create dataframes with minimum and maximum values
+min_values <- as.data.frame(coef_results_df %>%
+  group_by(Variable) %>%
+  summarize(min_value = round(min(Estimate, na.rm = TRUE),3)))
+
+max_values <- as.data.frame(coef_results_df %>%
+  group_by(Variable) %>%
+  summarize(max_value = round(max(Estimate, na.rm = TRUE),3)))
+
+min_max_est<-cbind(min_values, max_values)
+min_max_est <- min_max_est[, -1]
+min_max_est<-as.data.frame(min_max_est%>%select(Variable, min_value, max_value))
+
+#combine results into one data table
+results_full<-cbind((round(summary(m_lat.reml)$coefficients, 3)), (round(boot.full$ci.estimates, 3)), min_max_est)
+
+write.csv(results_full, "/lat_gest_glmm_results_full.csv")
+```
+
+*Model 2. glmm comparing latency between communities*
+
+```{r}
+#extract just gesture-to-gesture interactions from big data
+mau_glmm<-subset(latency_glmm, latency_glmm$Type=="Gesture")
+#adult sample
+mau_glmm_adult<-subset(mau_glmm,Sgn_age>10|Rcp_age>10)
+mau_glmm_adult<-subset(mau_glmm_adult,Social_unit!="Kalinzu")
+#sample size descriptive - note this should be repeated for the adult only sample
+nrow(mau_glmm)
+head(mau_glmm)
+table(mau_glmm_adult$Social_unit)
+nlevels(as.factor(mau_glmm_adult$ID_dyad))
+
+library(lme4)
+
+#set reference level to Sonso - repeated for each community as reference level
+mau_glmm$Social_unit<-relevel(mau_glmm$Social_unit, ref = "Sonso")
+
+#build model
+m1<-lme4::lmer(Latency~Social_unit+(1|ID_dyad)+(1|Com_number), data=mau_glmm, REML=F)
+
+#check model assumptions qq plots and residual distribution
+setwd("/workingdirectory")
+source("diagnostic_fcns.r")
+qqm1<-diagnostics.plot(m1)#okay
+diag_ranm1<-ranef.diagn.plot(m1)#okay
+
+
+#check model stability
+source("glmm_stability.r")
+full.stab=glmm.model.stab(model.res=m1, contr=NULL, para=F, data=NULL)
+head(full.stab$detailed, 4)
+table(full.stab$detailed$lme4.warnings)
+table(full.stab$detailed$opt.warnings)
+#look at full model stablity 
+round(full.stab$summary[, -1], 3)
+
+#look at full model stablity 
+round(full.stab$summary[, -1], 3)
+
+#identify the rows that will include random effects
+is.re=grepl(x=rownames(full.stab$summary), pattern="@")
+#plot stability of fixed effects in the model
+m.stab.plot(full.stab$summary[!is.re, -1])
+#plot stability of random effect in the model
+m.stab.plot(full.stab$summary[is.re, -1])
+
+
+#create null model for full-null comparison
+null_m1=lmer(Latency~(1|ID_dyad)+(1|Com_number), data=mau_glmm, REML=F)
+
+#full null comparison
+as.data.frame(anova(null_m1, m1, test="Chisq"))
+
+#lmer_Test results
+library(lmerTest)
+m1.reml=lmerTest::lmer(Latency~Social_unit+(1|ID_dyad)+(1|Com_number), data=mau_glmm, REML=T)
+round(summary(m1.reml)$coefficients, 3)
+
+#create dataframe with the results
+result_m1<-as.data.frame(drop1(m1, test="Chisq"))
+round(result_m1, 3)
+summary(m1.reml)$coefficient
+
+#bootstrapped confidence intervals
+source("boot_glmm.r")
+boot.full.m1=boot.glmm.pred(model.res=m1, excl.warnings=F,
+nboots=1000, para=T, n.cores=4, resol=1000, level=0.95)
+#results
+round(boot.full.m1$ci.estimates, 3)
+
+m.stab.plot(boot.full.m1$ci.estimates)
+
+#getting minimum and maximum by dropping one random effect at a time
+coef_m1results_df <- data.frame(ID_dyad = numeric(0),
+                              Variable = character(0),
+                              Estimate = numeric(0),
+                              Std_Error = numeric(0),
+                              t_value = numeric(0),
+                              p_value = numeric(0))
+for(i in unique(mau_glmm$ID_dyad)){
+  m_temp<-lmerTest::lmer(Latency~Social_unit+(1|ID_dyad)+(1|Com_number), data=mau_glmm[!mau_glmm$ID_dyad==i,])
+  #store the results from all the models 
+ temp_df <- data.frame(ID_dyad = i,
+                       Variable = rownames(coef(summary(m_temp))),
+                        Estimate = coef(summary(m_temp))[, 1],
+                        Std_Error = coef(summary(m_temp))[, 2],
+                        t_value = coef(summary(m_temp))[, 3],
+                        p_value = coef(summary(m_temp))[, 4])
+  
+  # Add the temporary data frame to coef_results_df
+  coef_m1results_df <- rbind(coef_m1results_df, temp_df)
+}
+head(coef_m1results_df)
+
+#create dataframes with minimum and maximum values
+min_values_m1 <- as.data.frame(coef_m1results_df %>%
+  group_by(Variable) %>%
+  summarize(min_value = round(min(Estimate, na.rm = TRUE),3)))
+
+max_values_m1 <- as.data.frame(coef_m1results_df %>%
+  group_by(Variable) %>%
+  summarize(max_value = round(max(Estimate, na.rm = TRUE),3)))
+
+min_max_est_m1<-cbind(min_values_m1, max_values_m1)
+min_max_est_m1 <- min_max_est_m1[, -1]
+min_max_est_m1<-as.data.frame(min_max_est_m1%>%select(Variable, min_value, max_value))
+
+# Convert Variable to a factor with custom order
+min_max_est_m1$Variable <- factor(min_max_est_m1$Variable, levels = c("(Intercept)","Social_unitWaibira", "Social_unitKanyawara","Social_unitKalinzu","Social_unitIssa"))
+
+min_max_est_m1 <- min_max_est_m1[order(min_max_est_m1$Variable), ]
+
+#combine all results into one table
+results_full_m1<-cbind((round(summary(m1.reml)$coefficients, 3)), (round(boot.full.m1$ci.estimates, 3)),min_max_est_m1 )
+results_full_m1
+
+results_full_m1<-results_full_m1%>%select(-Variable)
+```
+
+**Plots**
+*plot latency across goals - Figure S1*
+
+```{r}
+library(dplyr)
+gest_plot<-raw_mau%>%select(Goal, Gesture_latency_MAU)
+out_plot<-raw_out%>%select(Goal, Outcome_duration)
+
+
+gest_plot$Data<-"Gesture"
+out_plot$Data<-"Behaviour"
+
+colnames(gest_plot)<-c("Goal", "Latency", "Data")
+colnames(out_plot)<-c("Goal", "Latency", "Data")
+
+
+plot_data<-rbind(gest_plot, out_plot)
+
+#remove play, unknown, and other
+levels(plot_data$Goal)
+plot_data<-plot_data[!plot_data$Goal%in%c("Other", "PlayChange", "PlayChangeChangeacon", "PlayChangeContactcha", "PlayContinue", "PlayStart", "StaySame", "Unknown"),]
+plot_data<-droplevels(plot_data)
+
+#anonymise the goals 
+# Get unique names
+unique_goal <- unique(plot_data$Goal)
+
+# Create a mapping between names and IDs
+anon_goal_map <- setNames(
+  paste0("Goal_", seq_along(unique_goal)),
+  unique_goal
+)
+
+# Anonymize the column by replacing names with IDs
+plot_data$Anon_Goal <- anon_goal_map[plot_data$Goal]
+head(plot_data)
+
+#reorder the levels to make sense
+plot_data$Anon_Goal <- factor(plot_data$Anon_Goal, levels = c("Goal_1", "Goal_2", "Goal_3", "Goal_4", "Goal_5", "Goal_6", "Goal_7", "Goal_8", "Goal_9", "Goal_10", 
+                                                              "Goal_11", "Goal_12","Goal_13", "Goal_14", "Goal_15", "Goal_16", "Goal_17", "Goal_18", "Goal_19", "Goal_20",
+                                                              "Goal_21", "Goal_22","Goal_23", "Goal_24", "Goal_25", "Goal_26", "Goal_27", "Goal_28", "Goal_29", "Goal_30",
+                                                              "Goal_31", "Goal_32","Goal_33", "Goal_34", "Goal_35", "Goal_36", "Goal_37"))
+
+#plot
+plot2<-ggplot(plot_data, aes(x = Anon_Goal, y = Latency, fill = Data)) +
+  geom_boxplot(position = position_dodge(width = 0.75), width = 0.7) +
+  labs(title = "",
+       x ="Goal",
+       y = "Latency (ms)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Gesture" = "lightblue", "Behaviour" = "lightgreen"))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  ylim(-5,15)+
+  theme(legend.position="none")
+
+plot1<-ggplot(plot_data, aes(x = Anon_Goal, y = Latency, fill = Data)) +
+  geom_boxplot(position = position_dodge(width = 0.75), width = 0.7) +
+  labs(title = "",
+       x = "",
+       y = "Latency (ms)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Gesture" = "lightblue", "Behaviour" = "lightgreen"))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ 
+library(ggplot2)
+library(ggpubr)
+plot1<-plot1+ggtitle("A")+theme(text=element_text(size=20), axis.title = element_text(size=18))
+plot2<-plot2+ggtitle("B")+theme(text=element_text(size=20),axis.title = element_text(size=18))
+
+combine_plot<-ggarrange(plot1, plot2, ncol = 1, common.legend = TRUE, legend="right")
+```
+
+*plot Figure 1*
+
+```{r}
+library(ggplot2)
+# Your original plot
+plot1 <- ggplot(mau_iqr_5, aes(x = Gesture_latency_MAU, colour = Social_unit, fill = Social_unit)) +
+  geom_density(alpha = 0.3) +
+  geom_segment(x = min(mau_iqr_5$Gesture_latency_MAU), y = -0.025, xend = max(mau_iqr_5$Gesture_latency_MAU), yend = -0.025, color = "black") +  # Plot line segment
+geom_point(x = mean(mau_iqr_5$Gesture_latency_MAU), y = -0.025, shape = "circle",color="black", size=2.5,inherit.aes = FALSE) + 
+  geom_point(x = median(mau_iqr_5$Gesture_latency_MAU), y = -0.025, shape = "square" ,color="black", size=2.5,inherit.aes = FALSE) +# Plot points
+  coord_cartesian(xlim = c(-2, 10),ylim =c( -0.05,0.6)) +
+  scale_x_continuous(breaks = seq(-2, 10, by = 2)) +  # Set x-axis breaks
+  theme_classic() +
+  ylab("Density") +
+  xlab("") +
+  ggtitle("A")+
+  theme(legend.position = "none")
+
+# Calculate density of the full dataset
+full_density <- density(mau_iqr_5$Gesture_latency_MAU, from = min(mau_iqr_5$Gesture_latency_MAU), to = max(mau_iqr_5$Gesture_latency_MAU))
+
+# Create a data frame for the full density
+df_full_density <- data.frame(x = full_density$x, y = full_density$y)
+
+# Add density distribution of the full dataset
+plot1 <- plot1 + 
+  geom_line(data = df_full_density, aes(x = x, y = y), color = "black", linetype = "solid", inherit.aes = FALSE)   # Use custom color palette
+
+#outcome latency plot
+plot2 <- ggplot(out_iqr_5, aes(x = Outcome_duration, colour = Social_unit, fill = Social_unit)) +
+  geom_density(alpha = 0.3) +
+  geom_segment(x = min(out_iqr_5$Outcome_duration), y = -0.025, xend = max(out_iqr_5$Outcome_duration), yend = -0.025, color = "black") +  # Plot line segment
+geom_point(x = mean(out_iqr_5$Outcome_duration), y = -0.025, shape = "circle",color="black", size=2.5,inherit.aes = FALSE) + 
+ geom_point(x = median(out_iqr_5$Outcome_duration), y = -0.025, shape = "square" ,color="black", size=2.5, inherit.aes = FALSE) +# Plot points
+  coord_cartesian(xlim = c(-2, 10),ylim =c( -0.05,0.6)) +
+  scale_x_continuous(breaks = seq(-2, 10, by = 2)) +  # Set x-axis breaks
+  theme_classic() +
+  ylab("Density") +
+  xlab("Latency duration (s)") +
+  ggtitle("B")+
+  theme(legend.position = "none")
+
+
+# Calculate density of the full dataset
+full_density_out <- density(out_iqr_5$Outcome_duration,from = min(out_iqr_5$Outcome_duration), to = max(out_iqr_5$Outcome_duration))
+# Create a data frame for the full density
+df_full_density_out <- data.frame(x = full_density_out$x, y = full_density_out$y)
+
+# Add density distribution of the full dataset
+plot2 <- plot2 + 
+  geom_line(data = df_full_density_out, aes(x = x, y = y), color = "black", linetype = "solid", inherit.aes = FALSE)   # Use custom color palette
+
+legend <- get_legend( 
+  plot1 + 
+    theme(legend.position = "bottom")+
+    labs(fill="Social Unit", color = "Social Unit")
+) 
+
+legend$labels$title <- "Social Unit"
+
+library(ggplot2)
+library(grid)
+
+# Create a dummy plot to generate the legend
+dummy_plot <- ggplot() +
+  geom_point(aes(x = 1, y = 1, shape = "Median"), color = "black", size = 3) +
+  geom_point(aes(x = 2, y = 1, shape = "Mean"), color = "black", size = 3) +
+  scale_shape_manual(name = "", values = c(Median = 15, Mean = 16)) +
+  theme_void()
+
+# Get the legend
+legend_dummy <- cowplot::get_legend(dummy_plot+
+  theme(legend.position = "bottom"))
+
+# Modify the labels
+legend_dummy$labels$shape[1] <- "Median"
+legend_dummy$labels$shape[2] <- "Mean"
+
+
+library(cowplot)
+combined_plot <- plot_grid(plot1, plot2, legend,legend_dummy, nrow=4, rel_heights = c(1, 1, 0.1,0.1))
+```
